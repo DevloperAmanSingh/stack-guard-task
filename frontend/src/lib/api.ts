@@ -17,7 +17,7 @@ export type ScanResponse = {
   errors: string[];
 };
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL;
 
 export async function fetchIssues(): Promise<Issue[]> {
   const res = await fetch(`${API_BASE}/tickets`, { cache: "no-store" });
