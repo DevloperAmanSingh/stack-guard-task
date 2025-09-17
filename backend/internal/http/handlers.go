@@ -1,7 +1,6 @@
 package http
 
 import (
-	"io"
 	"log"
 	"strings"
 	"time"
@@ -73,50 +72,6 @@ func scanHandler(c *fiber.Ctx) error {
 	metadata := strings.Join(metaLines, "\n")
 
 	return scanAndCreateIssues(c, payload, metadata, req)
-}
-
-func scanFileHandler(c *fiber.Ctx) error {
-	file, err := c.FormFile("file")
-	if err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "file required"})
-	}
-
-	src, err := file.Open()
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed to read file"})
-	}
-	defer src.Close()
-
-	buf, err := io.ReadAll(src)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "failed to read file"})
-	}
-
-	repo := c.FormValue("repo")
-	commit := c.FormValue("commit")
-	channel := c.FormValue("channel")
-	path := c.FormValue("file")
-	if path == "" {
-		path = file.Filename
-	}
-
-	metaLines := []string{}
-	if repo != "" {
-		metaLines = append(metaLines, "Repository: "+repo)
-	}
-	if commit != "" {
-		metaLines = append(metaLines, "Commit: "+commit)
-	}
-	if channel != "" {
-		metaLines = append(metaLines, "Channel: "+channel)
-	}
-	if path != "" {
-		metaLines = append(metaLines, "File: "+path)
-	}
-	metadata := strings.Join(metaLines, "\n")
-
-	req := ScanRequest{Repo: repo, Commit: commit, Channel: channel, File: path}
-	return scanAndCreateIssues(c, string(buf), metadata, req)
 }
 
 func scanAndCreateIssues(c *fiber.Ctx, payload string, metadata string, req ScanRequest) error {
