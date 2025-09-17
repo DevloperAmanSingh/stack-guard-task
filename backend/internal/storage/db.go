@@ -12,11 +12,11 @@ import (
 var DB *gorm.DB
 
 func Connect() error {
-	host := getenv("POSTGRES_HOST", "localhost")
-	port := getenv("POSTGRES_PORT", "5432")
-	dbname := getenv("POSTGRES_DB", "secrets")
-	user := getenv("POSTGRES_USER", "postgres")
-	pass := getenv("POSTGRES_PASSWORD", "postgres")
+	host := os.Getenv("POSTGRES_HOST")
+	port := os.Getenv("POSTGRES_PORT")
+	dbname := os.Getenv("POSTGRES_DB")
+	user := os.Getenv("POSTGRES_USER")
+	pass := os.Getenv("POSTGRES_PASSWORD")
 
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=require", host, user, pass, dbname, port)
 	var db *gorm.DB
