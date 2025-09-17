@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Issue, resolveIssue, severityForType } from "@/lib/api";
+import {
+  Issue,
+  resolveIssue,
+  severityForType,
+  ignoreIssue,
+  bulkTicketsAction,
+} from "@/lib/api";
 import { SeverityBadge } from "./SeverityBadge";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,12 +49,17 @@ function EyeIcon(props: React.SVGProps<SVGSVGElement>) {
 
 type Props = {
   issues: Issue[];
+  onNotify?: (msg: string, kind?: "success" | "error") => void;
 };
 
-export function TicketsTable({ issues }: Props) {
+export function TicketsTable({ issues, onNotify }: Props) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [view, setView] = useState<Issue | null>(null);
+  const [ignoreId, setIgnoreId] = useState<string | null>(null);
+  const [ignoreTTL, setIgnoreTTL] = useState<string>("");
+  const [ignoreReason, setIgnoreReason] = useState<string>("");
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
 
   async function handleResolve(id: string) {
     try {
@@ -57,9 +68,42 @@ export function TicketsTable({ issues }: Props) {
       // Optimistic remove from view
       const row = document.getElementById(`row-${id}`);
       row?.classList.add("opacity-50");
+      onNotify?.("Resolved", "success");
     } finally {
       setBusyId(null);
       setConfirmId(null);
+    }
+  }
+
+  async function handleIgnore(id: string) {
+    try {
+      setBusyId(id);
+      const ttl = parseInt(ignoreTTL || "0", 10);
+      await ignoreIssue(id, {
+        reason: ignoreReason || undefined,
+        ttlDays: isNaN(ttl) ? undefined : ttl,
+      });
+      const row = document.getElementById(`row-${id}`);
+      row?.classList.add("opacity-50");
+      onNotify?.("Ignored", "success");
+    } finally {
+      setBusyId(null);
+      setIgnoreId(null);
+      setIgnoreTTL("");
+      setIgnoreReason("");
+    }
+  }
+
+  async function handleBulk(action: "resolve" | "ignore") {
+    const ids = Object.keys(selected).filter((k) => selected[k]);
+    if (!ids.length) return;
+    const res = await bulkTicketsAction(action, ids);
+    if (res.success) {
+      ids.forEach((id) =>
+        document.getElementById(`row-${id}`)?.classList.add("opacity-50")
+      );
+      setSelected({});
+      onNotify?.(`${action} ${res.updated} tickets`, "success");
     }
   }
 
@@ -73,9 +117,31 @@ export function TicketsTable({ issues }: Props) {
 
   return (
     <div className="w-full overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-950">
+      <div className="flex items-center justify-between p-3 border-b border-zinc-800">
+        <div className="text-sm text-zinc-400">
+          Showing {issues.length} tickets
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            className="bg-zinc-800 hover:bg-zinc-700 text-white border-zinc-600"
+            onClick={() => handleBulk("resolve")}
+          >
+            Resolve Selected
+          </Button>
+          <Button
+            variant="secondary"
+            className="bg-zinc-800 hover:bg-zinc-700 text-white border-zinc-600"
+            onClick={() => handleBulk("ignore")}
+          >
+            Ignore Selected
+          </Button>
+        </div>
+      </div>
       <Table>
         <TableHeader>
           <TableRow className="border-zinc-800 hover:bg-zinc-900/50">
+            <TableHead className="w-10"></TableHead>
             <TableHead className="text-zinc-300 font-medium">ID</TableHead>
             <TableHead className="text-zinc-300 font-medium">Type</TableHead>
             <TableHead className="text-zinc-300 font-medium">
@@ -101,6 +167,16 @@ export function TicketsTable({ issues }: Props) {
                 id={`row-${t.id}`}
                 className="border-zinc-800 hover:bg-zinc-900/30"
               >
+                <TableCell>
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-zinc-500"
+                    checked={!!selected[t.id]}
+                    onChange={(e) =>
+                      setSelected((s) => ({ ...s, [t.id]: e.target.checked }))
+                    }
+                  />
+                </TableCell>
                 <TableCell className="font-mono text-xs text-zinc-400 max-w-[200px] truncate">
                   {t.id}
                 </TableCell>
@@ -302,15 +378,71 @@ export function TicketsTable({ issues }: Props) {
                         </DialogContent>
                       </Dialog>
                     )}
+
+                    {t.status !== "ignored" && (
+                      <Dialog
+                        open={ignoreId === t.id}
+                        onOpenChange={(o) => setIgnoreId(o ? t.id : null)}
+                      >
+                        <DialogTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busyId === t.id}
+                            className="border-zinc-600 bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
+                          >
+                            Ignore
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent className="bg-zinc-950 border-zinc-800">
+                          <DialogHeader>
+                            <DialogTitle className="text-white">
+                              Ignore Ticket
+                            </DialogTitle>
+                            <DialogDescription className="text-zinc-400">
+                              Optionally set a TTL (days) and reason.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="flex gap-3">
+                            <input
+                              placeholder="TTL days"
+                              className="bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-sm text-white w-32"
+                              value={ignoreTTL}
+                              onChange={(e) => setIgnoreTTL(e.target.value)}
+                            />
+                            <input
+                              placeholder="Reason (optional)"
+                              className="bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-sm text-white flex-1"
+                              value={ignoreReason}
+                              onChange={(e) => setIgnoreReason(e.target.value)}
+                            />
+                          </div>
+                          <DialogFooter>
+                            <Button
+                              variant="default"
+                              onClick={() => setIgnoreId(null)}
+                              className="border-zinc-600 text-zinc-300 hover:text-white hover:bg-zinc-800"
+                            >
+                              Cancel
+                            </Button>
+                            <Button
+                              onClick={() => handleIgnore(t.id)}
+                              disabled={busyId === t.id}
+                              className="bg-yellow-700 hover:bg-yellow-600 text-white"
+                            >
+                              {busyId === t.id ? "Ignoring..." : "Confirm"}
+                            </Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+                    )}
                   </div>
                 </TableCell>
               </TableRow>
             );
           })}
         </TableBody>
-        <TableCaption className="text-zinc-500 py-3">
-          Showing {issues.length} tickets
-        </TableCaption>
+        <TableCaption className="text-zinc-500 py-3"></TableCaption>
       </Table>
     </div>
   );
