@@ -70,12 +70,6 @@ The scanner detects various types of secrets:
 ## Development
 
 ```bash
-# Run tests
-go test ./...
-
-# Format code
-go fmt ./...
-
 # Build binary
 go build -o server cmd/server/main.go
 ```
