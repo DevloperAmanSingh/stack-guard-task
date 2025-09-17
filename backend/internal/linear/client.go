@@ -37,8 +37,8 @@ func CreateIssue(secretType, metadata string, ts time.Time) (string, error) {
 		return "", fmt.Errorf("LINEAR_TEAM_ID must be a UUID")
 	}
 
-	// Build structured, redaction-safe description
-	desc := fmt.Sprintf("Severity: %s\nType: %s\nDetected: %s\n\nContext:\n%s\n\nRemediation:\n- Immediately revoke/rotate the credential.\n- Remove the secret from source/logs and force-push if in VCS.\n- Audit usage and monitor for abuse.\n\nNotes:\n- Values are not stored or logged.\n- API key: **** (redacted)",
+	// Build structured, redaction-safe description (no remediation)
+	desc := fmt.Sprintf("Severity: %s\nType: %s\nDetected: %s\n\nContext:\n%s\n\nNotes:\n- Values are not stored or logged.\n- API key: **** (redacted)",
 		severityForType(secretType),
 		secretType,
 		ts.Format(time.RFC3339),
