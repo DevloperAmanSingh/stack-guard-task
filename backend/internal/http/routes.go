@@ -2,6 +2,7 @@ package http
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
 )
 
 func SetupRoutes() *fiber.App {
@@ -17,20 +18,13 @@ func SetupRoutes() *fiber.App {
 		},
 	})
 
-	app.Use(func(c *fiber.Ctx) error {
-		c.Set("Access-Control-Allow-Origin", "*")
-		c.Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		c.Set("Access-Control-Allow-Headers", "*")
-
-		// if c.Method() == "OPTIONS" {
-		// 	return c.SendStatus(204)
-		// }
-		if c.Method() == fiber.MethodOptions {
-			return c.SendStatus(fiber.StatusNoContent)
-		}
-
-		return c.Next()
-	})
+	app.Use(cors.New(cors.Config{
+		AllowOrigins:     "*",
+		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
+		AllowHeaders:     "*",
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
 
 	// Routes
 	app.Get("/ping", pingHandler)
