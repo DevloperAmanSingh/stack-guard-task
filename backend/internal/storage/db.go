@@ -18,7 +18,7 @@ func Connect() error {
 	user := getenv("POSTGRES_USER", "postgres")
 	pass := getenv("POSTGRES_PASSWORD", "postgres")
 
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=UTC", host, user, pass, dbname, port)
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=require", host, user, pass, dbname, port)
 	var db *gorm.DB
 	var err error
 	for i := 0; i < 15; i++ {

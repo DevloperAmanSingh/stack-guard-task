@@ -1,10 +1,8 @@
 package http
 
 import (
-	"encoding/json"
 	"io"
 	"log"
-	"net/http"
 	"strings"
 	"time"
 
@@ -12,9 +10,8 @@ import (
 	"github.com/DevloperAmanSingh/secret-scanning/internal/scanner"
 	"github.com/DevloperAmanSingh/secret-scanning/internal/storage"
 
-	"github.com/gorilla/mux"
+	"github.com/gofiber/fiber/v2"
 )
-
 
 type ScanRequest struct {
 	Content string `json:"content"`
@@ -39,11 +36,17 @@ type ResolveResponse struct {
 	Error   string `json:"error,omitempty"`
 }
 
-func scanHandler(w http.ResponseWriter, r *http.Request) {
+func pingHandler(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{
+		"status":  "ok",
+		"message": "pong",
+	})
+}
+
+func scanHandler(c *fiber.Ctx) error {
 	var req ScanRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
-		return
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
 	}
 
 	payload := req.Content
@@ -69,32 +72,34 @@ func scanHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	metadata := strings.Join(metaLines, "\n")
 
-	scanAndCreateIssues(w, payload, metadata, req)
+	return scanAndCreateIssues(c, payload, metadata, req)
 }
 
-func scanFileHandler(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(16 << 20); err != nil {
-		http.Error(w, "invalid multipart form", http.StatusBadRequest)
-		return
-	}
-	file, header, err := r.FormFile("file")
+func scanFileHandler(c *fiber.Ctx) error {
+	file, err := c.FormFile("file")
 	if err != nil {
-		http.Error(w, "file required", http.StatusBadRequest)
-		return
+		return c.Status(400).JSON(fiber.Map{"error": "file required"})
 	}
-	defer file.Close()
-	buf, err := io.ReadAll(file)
+
+	src, err := file.Open()
 	if err != nil {
-		http.Error(w, "failed to read file", http.StatusInternalServerError)
-		return
+		return c.Status(500).JSON(fiber.Map{"error": "failed to read file"})
 	}
-	repo := r.FormValue("repo")
-	commit := r.FormValue("commit")
-	channel := r.FormValue("channel")
-	path := r.FormValue("file")
-	if path == "" && header != nil {
-		path = header.Filename
+	defer src.Close()
+
+	buf, err := io.ReadAll(src)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "failed to read file"})
 	}
+
+	repo := c.FormValue("repo")
+	commit := c.FormValue("commit")
+	channel := c.FormValue("channel")
+	path := c.FormValue("file")
+	if path == "" {
+		path = file.Filename
+	}
+
 	metaLines := []string{}
 	if repo != "" {
 		metaLines = append(metaLines, "Repository: "+repo)
@@ -111,10 +116,10 @@ func scanFileHandler(w http.ResponseWriter, r *http.Request) {
 	metadata := strings.Join(metaLines, "\n")
 
 	req := ScanRequest{Repo: repo, Commit: commit, Channel: channel, File: path}
-	scanAndCreateIssues(w, string(buf), metadata, req)
+	return scanAndCreateIssues(c, string(buf), metadata, req)
 }
 
-func scanAndCreateIssues(w http.ResponseWriter, payload string, metadata string, req ScanRequest) {
+func scanAndCreateIssues(c *fiber.Ctx, payload string, metadata string, req ScanRequest) error {
 	findings := scanner.Scan(payload)
 	log.Printf("/scan findings: count=%d", len(findings))
 
@@ -151,8 +156,7 @@ func scanAndCreateIssues(w http.ResponseWriter, payload string, metadata string,
 		created++
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ScanResponse{
+	return c.JSON(ScanResponse{
 		Success: created > 0 && len(errs) == 0,
 		Created: created,
 		Issues:  respIssues,
@@ -160,30 +164,31 @@ func scanAndCreateIssues(w http.ResponseWriter, payload string, metadata string,
 	})
 }
 
-func listTicketsHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+func listTicketsHandler(c *fiber.Ctx) error {
 	var issues []storage.Issue
 	if err := storage.DB.Order("created_at desc").Find(&issues).Error; err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("db error"))
-		return
+		return c.Status(500).JSON(fiber.Map{"error": "db error"})
 	}
-	json.NewEncoder(w).Encode(issues)
+	return c.JSON(issues)
 }
 
-func resolveHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	id := vars["id"]
+func resolveHandler(c *fiber.Ctx) error {
+	id := c.Params("id")
 
 	if err := linear.CloseIssue(id); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadGateway)
-		json.NewEncoder(w).Encode(ResolveResponse{Success: false, ID: id, Status: "", Error: err.Error()})
-		return
+		return c.Status(502).JSON(ResolveResponse{
+			Success: false,
+			ID:      id,
+			Status:  "",
+			Error:   err.Error(),
+		})
 	}
 
 	_ = storage.DB.Model(&storage.Issue{}).Where("id = ?", id).Update("status", "resolved").Error
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ResolveResponse{Success: true, ID: id, Status: "resolved"})
+	return c.JSON(ResolveResponse{
+		Success: true,
+		ID:      id,
+		Status:  "resolved",
+	})
 }

@@ -1,32 +1,40 @@
 package http
 
 import (
-	"net/http"
-
-	"github.com/gorilla/mux"
+	"github.com/gofiber/fiber/v2"
 )
 
-func simpleCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "*")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
+func SetupRoutes() *fiber.App {
+	app := fiber.New(fiber.Config{
+		ErrorHandler: func(c *fiber.Ctx, err error) error {
+			code := fiber.StatusInternalServerError
+			if e, ok := err.(*fiber.Error); ok {
+				code = e.Code
+			}
+			return c.Status(code).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		},
 	})
-}
 
-func SetupRoutes() *mux.Router {
-	r := mux.NewRouter()
-	r.Use(simpleCORS)
+	app.Use(func(c *fiber.Ctx) error {
+		c.Set("Access-Control-Allow-Origin", "*")
+		c.Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
+		c.Set("Access-Control-Allow-Headers", "*")
 
-	r.HandleFunc("/scan", scanHandler).Methods("POST")
-	r.HandleFunc("/scan/file", scanFileHandler).Methods("POST")
-	r.HandleFunc("/tickets", listTicketsHandler).Methods("GET")
-	r.HandleFunc("/resolve/{id}", resolveHandler).Methods("POST")
+		if c.Method() == "OPTIONS" {
+			return c.SendStatus(204)
+		}
 
-	return r
+		return c.Next()
+	})
+
+	// Routes
+	app.Get("/ping", pingHandler)
+	app.Post("/scan", scanHandler)
+	app.Post("/scan/file", scanFileHandler)
+	app.Get("/tickets", listTicketsHandler)
+	app.Post("/resolve/:id", resolveHandler)
+
+	return app
 }

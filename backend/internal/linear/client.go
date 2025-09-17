@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"time"
 )
@@ -15,8 +16,8 @@ var linearURL = "https://api.linear.app/graphql"
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
 
 func CreateIssue(secretType, metadata string, ts time.Time) (string, error) {
-	token := "lin_api_bwwF6AiGZAKgP9SEsomNIimJa29EBRqmRN16HJBR"
-	teamID := "18a5c30c-ae30-4e58-b7b3-4086a3f64761"
+	token := os.Getenv("LINEAR_API_KEY")
+	teamID := os.Getenv("LINEAR_TEAM_ID")
 	if token == "" || teamID == "" {
 		return "", fmt.Errorf("missing LINEAR_API_KEY or LINEAR_TEAM_ID")
 	}
@@ -158,8 +159,10 @@ func getCompletedStateID(token, teamID string) (string, error) {
 }
 
 func CloseIssue(id string) error {
-	token := "lin_api_bwwF6AiGZAKgP9SEsomNIimJa29EBRqmRN16HJBR"
-	teamID := "18a5c30c-ae30-4e58-b7b3-4086a3f64761"
+	token := os.Getenv("LINEAR_API_KEY")
+	teamID := os.Getenv("LINEAR_TEAM_ID")
+	fmt.Println("token", token)
+	fmt.Println("teamID", teamID)
 	if token == "" {
 		return fmt.Errorf("missing LINEAR_API_KEY")
 	}

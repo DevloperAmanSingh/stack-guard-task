@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"net/http"
 
 	apphttp "github.com/DevloperAmanSingh/secret-scanning/internal/http"
 	"github.com/DevloperAmanSingh/secret-scanning/internal/storage"
@@ -16,8 +15,7 @@ func main() {
 		log.Fatalf("db migrate error: %v", err)
 	}
 
-
-	r := apphttp.SetupRoutes()
+	app := apphttp.SetupRoutes()
 	log.Println("🚀 Backend API running on :8080")
-	log.Fatal(http.ListenAndServe(":8080", r))
+	log.Fatal(app.Listen(":8080"))
 }
