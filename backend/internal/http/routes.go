@@ -22,8 +22,11 @@ func SetupRoutes() *fiber.App {
 		c.Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		c.Set("Access-Control-Allow-Headers", "*")
 
-		if c.Method() == "OPTIONS" {
-			return c.SendStatus(204)
+		// if c.Method() == "OPTIONS" {
+		// 	return c.SendStatus(204)
+		// }
+		if c.Method() == fiber.MethodOptions {
+			return c.SendStatus(fiber.StatusNoContent)
 		}
 
 		return c.Next()
@@ -32,7 +35,6 @@ func SetupRoutes() *fiber.App {
 	// Routes
 	app.Get("/ping", pingHandler)
 	app.Post("/scan", scanHandler)
-	app.Post("/scan/file", scanFileHandler)
 	app.Get("/tickets", listTicketsHandler)
 	app.Post("/resolve/:id", resolveHandler)
 
