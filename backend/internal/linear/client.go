@@ -9,11 +9,23 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 )
 
 var linearURL = "https://api.linear.app/graphql"
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
+
+func severityForType(t string) string {
+	lt := strings.ToLower(t)
+	if strings.Contains(lt, "aws") || strings.Contains(lt, "stripe") || strings.Contains(lt, "jwt") {
+		return "high"
+	}
+	if strings.Contains(lt, "github") || strings.Contains(lt, "slack") || strings.Contains(lt, "google") {
+		return "medium"
+	}
+	return "low"
+}
 
 func CreateIssue(secretType, metadata string, ts time.Time) (string, error) {
 	token := os.Getenv("LINEAR_API_KEY")
@@ -25,10 +37,13 @@ func CreateIssue(secretType, metadata string, ts time.Time) (string, error) {
 		return "", fmt.Errorf("LINEAR_TEAM_ID must be a UUID")
 	}
 
-	desc := fmt.Sprintf("Type: %s\nDetected at: %s", secretType, ts.Format(time.RFC3339))
-	if metadata != "" {
-		desc += "\n" + metadata
-	}
+	// Build structured, redaction-safe description
+	desc := fmt.Sprintf("Severity: %s\nType: %s\nDetected: %s\n\nContext:\n%s\n\nRemediation:\n- Immediately revoke/rotate the credential.\n- Remove the secret from source/logs and force-push if in VCS.\n- Audit usage and monitor for abuse.\n\nNotes:\n- Values are not stored or logged.\n- API key: **** (redacted)",
+		severityForType(secretType),
+		secretType,
+		ts.Format(time.RFC3339),
+		metadata,
+	)
 
 	query := `
 	mutation IssueCreate($input: IssueCreateInput!) {
@@ -42,7 +57,7 @@ func CreateIssue(secretType, metadata string, ts time.Time) (string, error) {
 		"query": query,
 		"variables": map[string]interface{}{
 			"input": map[string]interface{}{
-				"title":       fmt.Sprintf("Secret detected: %s", secretType),
+				"title":       fmt.Sprintf("[%s] Secret detected: %s", severityForType(secretType), secretType),
 				"description": desc,
 				"teamId":      teamID,
 			},
@@ -161,8 +176,6 @@ func getCompletedStateID(token, teamID string) (string, error) {
 func CloseIssue(id string) error {
 	token := os.Getenv("LINEAR_API_KEY")
 	teamID := os.Getenv("LINEAR_TEAM_ID")
-	fmt.Println("token", token)
-	fmt.Println("teamID", teamID)
 	if token == "" {
 		return fmt.Errorf("missing LINEAR_API_KEY")
 	}

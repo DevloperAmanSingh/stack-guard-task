@@ -29,8 +29,11 @@ func SetupRoutes() *fiber.App {
 	// Routes
 	app.Get("/ping", pingHandler)
 	app.Post("/scan", scanHandler)
+	app.Post("/scan/bulk", scanBulkHandler)
 	app.Get("/tickets", listTicketsHandler)
 	app.Post("/resolve/:id", resolveHandler)
+	app.Post("/ignore/:id", ignoreHandler)
+	app.Post("/tickets/bulk", ticketsBulkHandler)
 
 	return app
 }

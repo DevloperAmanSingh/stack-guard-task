@@ -16,6 +16,15 @@ type Issue struct {
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
+type Suppression struct {
+	ID          uint       `gorm:"primaryKey" json:"id"`
+	Fingerprint string     `gorm:"index;size:64" json:"fingerprint"`
+	Reason      string     `gorm:"type:text" json:"reason"`
+	ExpiresAt   *time.Time `json:"expiresAt"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+}
+
 func Migrate() error {
-	return DB.AutoMigrate(&Issue{})
+	return DB.AutoMigrate(&Issue{}, &Suppression{})
 }

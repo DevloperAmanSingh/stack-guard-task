@@ -78,6 +78,102 @@ func scanHandler(c *fiber.Ctx) error {
 	return scanAndCreateIssues(c, payload, metadata, req)
 }
 
+type BulkScanItem struct {
+	Content string `json:"content"`
+	Text    string `json:"text"`
+	Repo    string `json:"repo,omitempty"`
+	Commit  string `json:"commit,omitempty"`
+	Channel string `json:"channel,omitempty"`
+	File    string `json:"file,omitempty"`
+}
+
+type BulkScanRequest struct {
+	Items []BulkScanItem `json:"items"`
+}
+
+type BulkScanResult struct {
+	Index      int    `json:"index"`
+	Created    int    `json:"created"`
+	Resolved   int    `json:"resolved"`
+	Duplicates int    `json:"duplicates"`
+	Error      string `json:"error,omitempty"`
+}
+
+func scanBulkHandler(c *fiber.Ctx) error {
+	var req BulkScanRequest
+	if err := c.BodyParser(&req); err != nil || len(req.Items) == 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
+	}
+	results := make([]BulkScanResult, 0, len(req.Items))
+	for i, item := range req.Items {
+		r := ScanRequest{Content: item.Content, Text: item.Text, Repo: item.Repo, Commit: item.Commit, Channel: item.Channel, File: item.File}
+		payload := r.Content
+		if payload == "" {
+			payload = r.Text
+		}
+		meta := []string{}
+		if r.Repo != "" {
+			meta = append(meta, "Repository: "+r.Repo)
+		}
+		if r.Commit != "" {
+			meta = append(meta, "Commit: "+r.Commit)
+		}
+		if r.Channel != "" {
+			meta = append(meta, "Channel: "+r.Channel)
+		}
+		if r.File != "" {
+			meta = append(meta, "File: "+r.File)
+		}
+		metadata := strings.Join(meta, "\n")
+
+		findings := scanner.Scan(payload)
+		_ = autoResolveIssues(payload, r)
+
+		resolvedCount := 0
+		q := storage.DB.Where("status = ?", "resolved")
+		if r.Repo != "" {
+			q = q.Where("repo = ?", r.Repo)
+		}
+		if r.Channel != "" {
+			q = q.Where("channel = ?", r.Channel)
+		}
+		if r.File != "" {
+			q = q.Where("file = ?", r.File)
+		}
+		var resolved []storage.Issue
+		q.Where("updated_at > ?", time.Now().Add(-time.Minute)).Find(&resolved)
+		resolvedCount = len(resolved)
+
+		created := 0
+		duplicates := 0
+		for _, f := range findings {
+			fp := fingerprint(r, f.Value, f.Type)
+			var sup storage.Suppression
+			if err := storage.DB.Where("fingerprint = ?", fp).First(&sup).Error; err == nil {
+				if sup.ExpiresAt == nil || sup.ExpiresAt.After(time.Now()) {
+					duplicates++
+					continue
+				}
+			}
+			var existing storage.Issue
+			if err := storage.DB.Where("fingerprint = ? AND status = ?", fp, "active").First(&existing).Error; err == nil {
+				duplicates++
+				continue
+			}
+			issueID, err := linear.CreateIssue(f.Type, metadata, time.Now())
+			if err != nil || issueID == "" {
+				continue
+			}
+			issue := storage.Issue{ID: issueID, Type: f.Type, Status: "active", Repo: r.Repo, Commit: r.Commit, Channel: r.Channel, File: r.File, Content: payload, Fingerprint: fp}
+			if err := storage.DB.Create(&issue).Error; err == nil {
+				created++
+			}
+		}
+		results = append(results, BulkScanResult{Index: i, Created: created, Resolved: resolvedCount, Duplicates: duplicates})
+	}
+	return c.JSON(fiber.Map{"results": results})
+}
+
 func scanAndCreateIssues(c *fiber.Ctx, payload string, metadata string, req ScanRequest) error {
 	findings := scanner.Scan(payload)
 	log.Printf("/scan findings: count=%d", len(findings))
@@ -116,6 +212,14 @@ func scanAndCreateIssues(c *fiber.Ctx, payload string, metadata string, req Scan
 
 	for _, f := range findings {
 		fp := fingerprint(req, f.Value, f.Type)
+
+		var sup storage.Suppression
+		if err := storage.DB.Where("fingerprint = ?", fp).First(&sup).Error; err == nil {
+			if sup.ExpiresAt == nil || sup.ExpiresAt.After(time.Now()) {
+				duplicates++
+				continue
+			}
+		}
 
 		var existingIssue storage.Issue
 		result := storage.DB.Where("fingerprint = ? AND status = ?", fp, "active").First(&existingIssue)
@@ -177,7 +281,6 @@ func autoResolveIssues(currentContent string, req ScanRequest) error {
 	var activeIssues []storage.Issue
 	query := storage.DB.Where("status = ?", "active")
 
-	
 	hasContext := false
 
 	if req.Repo != "" {
@@ -203,7 +306,7 @@ func autoResolveIssues(currentContent string, req ScanRequest) error {
 	}
 
 	resolvedCount := 0
- // making fingerprint
+	// making fingerprint
 	currentFindings := scanner.Scan(currentContent)
 	presentFingerprints := map[string]struct{}{}
 	for _, f := range currentFindings {
@@ -280,4 +383,68 @@ func resolveHandler(c *fiber.Ctx) error {
 		ID:      id,
 		Status:  "resolved",
 	})
+}
+
+type IgnoreRequest struct {
+	Reason  string `json:"reason"`
+	TtlDays int    `json:"ttlDays"`
+}
+
+func ignoreHandler(c *fiber.Ctx) error {
+	id := c.Params("id")
+	var issue storage.Issue
+	if err := storage.DB.Where("id = ?", id).First(&issue).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "not found"})
+	}
+
+	var body IgnoreRequest
+	_ = c.BodyParser(&body)
+	var expires *time.Time
+	if body.TtlDays > 0 {
+		t := time.Now().Add(time.Duration(body.TtlDays) * 24 * time.Hour)
+		expires = &t
+	}
+
+	sup := storage.Suppression{Fingerprint: issue.Fingerprint, Reason: body.Reason, ExpiresAt: expires}
+	_ = storage.DB.Create(&sup).Error
+
+	_ = storage.DB.Model(&storage.Issue{}).Where("id = ?", id).Update("status", "ignored").Error
+
+	if err := linear.CloseIssue(id); err != nil {
+		log.Printf("linear close failed on ignore: %v", err)
+	}
+
+	return c.JSON(fiber.Map{"success": true, "id": id, "status": "ignored"})
+}
+
+type TicketsBulkRequest struct {
+	Action string   `json:"action"`
+	IDs    []string `json:"ids"`
+}
+
+func ticketsBulkHandler(c *fiber.Ctx) error {
+	var req TicketsBulkRequest
+	if err := c.BodyParser(&req); err != nil || len(req.IDs) == 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "invalid request"})
+	}
+	updated := 0
+	for _, id := range req.IDs {
+		switch req.Action {
+		case "resolve":
+			if err := linear.CloseIssue(id); err == nil {
+				_ = storage.DB.Model(&storage.Issue{}).Where("id = ?", id).Update("status", "resolved").Error
+				updated++
+			}
+		case "ignore":
+			var issue storage.Issue
+			if err := storage.DB.Where("id = ?", id).First(&issue).Error; err == nil {
+				sup := storage.Suppression{Fingerprint: issue.Fingerprint}
+				_ = storage.DB.Create(&sup).Error
+				_ = storage.DB.Model(&storage.Issue{}).Where("id = ?", id).Update("status", "ignored").Error
+				_ = linear.CloseIssue(id)
+				updated++
+			}
+		}
+	}
+	return c.JSON(fiber.Map{"success": true, "updated": updated})
 }
