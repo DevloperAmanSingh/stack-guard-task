@@ -19,7 +19,7 @@ func SetupRoutes() *fiber.App {
 	})
 
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "https://stack-guard-task.vercel.app",
+		AllowOrigins:     "*",
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
 		AllowHeaders:     "*",
 		AllowCredentials: false,
